@@ -25,6 +25,10 @@ source-repository head
 library
   hs-source-dirs:  src
   default-language: Haskell2010
+  -- Use -fobject-code to work around GHC 7.10.2 bugs:
+  -- https://ghc.haskell.org/trac/ghc/ticket/10052 and
+  -- https://ghc.haskell.org/trac/ghc/ticket/10549
+  ghc-options: -fobject-code
   build-depends:
         base >= 4,
         filepath,
@@ -47,7 +51,10 @@ library
 executable ghcid
   hs-source-dirs: src
   default-language: Haskell2010
-  ghc-options: -main-is Ghcid.main -threaded
+  -- Use -fobject-code to work around GHC 7.10.2 bugs:
+  -- https://ghc.haskell.org/trac/ghc/ticket/10052 and
+  -- https://ghc.haskell.org/trac/ghc/ticket/10549
+  ghc-options: -main-is Ghcid.main -threaded -fobject-code
   main-is: Ghcid.hs
   build-depends:
       base == 4.*,
