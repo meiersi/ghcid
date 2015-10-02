@@ -5,6 +5,7 @@
 module Ghcid(main, runGhcid) where
 
 import Control.Applicative
+import Control.Concurrent.Async (withAsync)
 import Control.Monad.Extra
 import Control.Concurrent.Extra
 import Data.List.Extra
@@ -185,12 +186,20 @@ runGhcid waiter restart command outputfiles test size titles output = do
             outputFill (Just (loadedCount, messages)) ["Running test..." | isJust test]
             forM_ outputfiles $ \file ->
                 writeFile file $ unlines $ map snd $ prettyOutput 1000000 loadedCount $ filter isMessage messages
-            whenJust test $ \test -> do
-                res <- exec ghci test
-                outputFill (Just (loadedCount, messages)) $ fromMaybe res $ stripSuffix ["*** Exception: ExitSuccess"] res
-                updateTitle ""
 
             let wait = nubOrd $ loaded ++ reloaded
+
+            whenJust test $ \test -> do
+                let interruptOnChange = do
+                        reason <- nextWait $ restart ++ wait
+                        outputFill Nothing $ "Interrupting tests due to changes in..." : map ("  " ++) reason
+                        interrupt ghci
+
+                withAsync interruptOnChange $ \_ -> do
+                    res <- exec ghci test
+                    outputFill (Just (loadedCount, messages)) $ fromMaybe res $ stripSuffix ["*** Exception: ExitSuccess"] res
+                    updateTitle ""
+
             when (null wait) $ do
                 putStrLn $ "No files loaded, probably did not start GHCi.\nCommand: " ++ command
                 exitFailure

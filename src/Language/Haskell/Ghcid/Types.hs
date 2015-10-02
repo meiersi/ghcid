@@ -7,7 +7,12 @@ import Data.Typeable
 import Control.Exception.Base (Exception)
 
 -- | A GHCi session. Created with 'startGhci'.
-newtype Ghci = Ghci (String -> IO [String])
+data Ghci = Ghci
+    { exec      :: !(String -> IO [String])
+      -- ^ Send a command, get lines of result.
+    , interrupt :: !(IO ())
+      -- ^ Send a CTRL-C to this GHCi session.
+    }
 
 -- | GHCi shut down
 data GhciError = UnexpectedExit String String

@@ -8,7 +8,8 @@ module Language.Haskell.Ghcid
  , startGhci
  , showModules
  , reload
- , exec
+ , T.exec
+ , T.interrupt
  , stopGhci
  )
 where
@@ -83,7 +84,7 @@ startGhci cmd directory echo = do
                     Just msg -> return  msg
     r <- parseLoad <$> f ""
     writeIORef echo False
-    return (Ghci f,r)
+    return (Ghci f (putStrLn "TODO (SM): implement interrupt"), r)
 
 
 -- | Show modules
@@ -97,7 +98,3 @@ reload ghci = parseLoad <$> exec ghci ":reload"
 -- | Stop GHCi
 stopGhci :: Ghci -> IO ()
 stopGhci ghci = handle (\UnexpectedExit{} -> return ()) $ void $ exec ghci ":quit"
-
--- | Send a command, get lines of result
-exec :: Ghci -> String -> IO [String]
-exec (Ghci x) = x
