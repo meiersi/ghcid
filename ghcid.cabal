@@ -36,6 +36,7 @@ library
         directory,
         extra >= 1.2,
         process >= 1.1,
+        unix,
         cmdargs >= 0.10,
         terminal-size >= 0.3
   if os(windows)
@@ -68,7 +69,8 @@ executable ghcid
       process >= 1.1,
       cmdargs >= 0.10,
       ansi-terminal,
-      terminal-size >= 0.3
+      terminal-size >= 0.3,
+      unix
   if os(windows)
     build-depends: Win32
   other-modules:

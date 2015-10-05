@@ -32,12 +32,16 @@ import Language.Haskell.Ghcid.Types as T
 import Language.Haskell.Ghcid.Util
 import Prelude
 
+import qualified System.Posix.Signals     as Signals
+import qualified System.Process.Internals as PI
+
+
 -- | Start GHCi, returning a function to perform further operation, as well as the result of the initial loading.
 --   Pass True to write out messages produced while loading, useful if invoking something like "cabal repl"
 --   which might compile dependent packages before really loading.
 startGhci :: String -> Maybe FilePath -> Bool -> IO (Ghci, [Load])
 startGhci cmd directory echo = do
-    (Just inp, Just out, Just err, _) <-
+    (Just inp, Just out, Just err, phandle) <-
         createProcess (shell cmd){std_in=CreatePipe, std_out=CreatePipe, std_err=CreatePipe, cwd = directory}
     hSetBuffering out LineBuffering
     hSetBuffering err LineBuffering
@@ -84,7 +88,15 @@ startGhci cmd directory echo = do
                     Just msg -> return  msg
     r <- parseLoad <$> f ""
     writeIORef echo False
-    return (Ghci f (putStrLn "TODO (SM): implement interrupt"), r)
+    return (Ghci f (interruptProcessGroupOf phandle), r)
+
+{-
+interruptProcess :: ProcessHandle -> IO ()
+interruptProcess phandle = PI.withProcessHandle phandle $ \phandle_ ->
+    case phandle_ of
+      PI.OpenHandle pid -> Signals.signalProcess Signals.sigINT pid
+      PI.ClosedHandle _ -> return ()
+-}
 
 
 -- | Show modules
