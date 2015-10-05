@@ -5,6 +5,7 @@
 module Ghcid(main, runGhcid) where
 
 import Control.Applicative
+import qualified Control.Concurrent.Async as Async
 import Control.Monad.Extra
 import Control.Concurrent.Extra
 import Data.List.Extra
@@ -18,6 +19,7 @@ import System.Directory.Extra
 import System.Exit
 import System.FilePath
 import System.IO
+import System.Process (callCommand)
 
 import Paths_ghcid
 import Language.Haskell.Ghcid
@@ -33,6 +35,7 @@ data Options = Options
     {command :: String
     ,arguments :: [String]
     ,test :: Maybe String
+    ,interrupt :: Maybe String
     ,height :: Maybe Int
     ,width :: Maybe Int
     ,topmost :: Bool
@@ -48,6 +51,7 @@ options = cmdArgsMode $ Options
     {command = "" &= typ "COMMAND" &= help "Command to run (defaults to ghci or cabal repl)"
     ,arguments = [] &= args &= typ "MODULE"
     ,test = Nothing &= name "T" &= typ "EXPR" &= help "Command to run after successful loading"
+    ,interrupt = Nothing &= name "I" &= typ "COMMAND" &= help "Command to interrupt the tests on a file change"
     ,height = Nothing &= help "Number of lines to use (defaults to console height)"
     ,width = Nothing &= help "Number of columns to use (defaults to console width)"
     ,topmost = False &= name "t" &= help "Set window topmost (Windows only)"
@@ -61,7 +65,7 @@ options = cmdArgsMode $ Options
 
 {-
 What happens on various command lines:
-
+interrupt the tests on a file change
 Hlint with no .ghci file:
 - cabal repl - prompt with Language.Haskell.HLint loaded
 - cabal exec ghci Sample.hs - prompt with Sample.hs loaded
@@ -123,7 +127,7 @@ main = withWindowIcon $ ctrlC $ do
                 -- so putStrLn width 'x' uses up two lines
                 return (f width 80 (pred . fst), f height 8 snd)
         withWaiterNotify $ \waiter ->
-            runGhcid waiter (nubOrd restart) command outputfile test height (not notitle) $ \xs -> do
+            runGhcid waiter (nubOrd restart) command outputfile test interrupt height (not notitle) $ \xs -> do
                 outWith $ forM_ (groupOn fst xs) $ \x@((s,_):_) -> do
                     when (s == Bold) $ setSGR [SetConsoleIntensity BoldIntensity]
                     putStr $ concatMap ((:) '\n' . snd) x
@@ -134,8 +138,8 @@ main = withWindowIcon $ ctrlC $ do
 data Style = Plain | Bold deriving Eq
 
 
-runGhcid :: Waiter -> [FilePath] -> String -> [FilePath] -> Maybe String -> IO (Int,Int) -> Bool -> ([(Style,String)] -> IO ()) -> IO ()
-runGhcid waiter restart command outputfiles test size titles output = do
+runGhcid :: Waiter -> [FilePath] -> String -> [FilePath] -> Maybe String -> Maybe String -> IO (Int,Int) -> Bool -> ([(Style,String)] -> IO ()) -> IO ()
+runGhcid waiter restart command outputfiles test mbInterruptCmd size titles output = do
     let outputFill :: Maybe (Int, [Load]) -> [String] -> IO ()
         outputFill load msg = do
             (width, height) <- size
@@ -185,16 +189,36 @@ runGhcid waiter restart command outputfiles test size titles output = do
             outputFill (Just (loadedCount, messages)) ["Running test..." | isJust test]
             forM_ outputfiles $ \file ->
                 writeFile file $ unlines $ map snd $ prettyOutput 1000000 loadedCount $ filter isMessage messages
-            whenJust test $ \test -> do
-                res <- exec ghci test
-                outputFill (Just (loadedCount, messages)) $ fromMaybe res $ stripSuffix ["*** Exception: ExitSuccess"] res
-                updateTitle ""
+            -- whenJust test $ \test -> do
+            --     res <- exec ghci test
+            --     outputFill (Just (loadedCount, messages)) $ fromMaybe res $ stripSuffix ["*** Exception: ExitSuccess"] res
+            --     updateTitle ""
 
             let wait = nubOrd $ loaded ++ reloaded
             when (null wait) $ do
                 putStrLn $ "No files loaded, probably did not start GHCi.\nCommand: " ++ command
                 exitFailure
-            reason <- nextWait $ restart ++ wait
+
+            -- spawn an async thread to wait for the next change
+            waitForChange <- Async.async $ nextWait $ restart ++ wait
+
+            whenJust test $ \test -> do
+                let interruptOnChange = case mbInterruptCmd of
+                        Nothing           -> return ()
+                        Just interruptCmd -> do
+                          void $ Async.wait waitForChange
+                          outputFill Nothing $
+                              ["Interrupting tests using: " ++ interruptCmd]
+                          callCommand interruptCmd
+                -- run tests with interrupt support
+                Async.withAsync interruptOnChange $ \_ -> do
+                    res <- exec ghci test
+                    outputFill (Just (loadedCount, messages)) $
+                        fromMaybe res $ stripSuffix ["*** Exception: ExitSuccess"] res
+                    updateTitle ""
+
+            -- wait for the next change
+            reason <- Async.wait waitForChange
             outputFill Nothing $ "Reloading..." : map ("  " ++) reason
             restartTimes2 <- mapM getModTime restart
             if restartTimes == restartTimes2 then do
@@ -204,7 +228,7 @@ runGhcid waiter restart command outputfiles test size titles output = do
                 fire nextWait messages warnings
             else do
                 stopGhci ghci
-                runGhcid waiter restart command outputfiles test size titles output
+                runGhcid waiter restart command outputfiles test mbInterruptCmd size titles output
 
     fire nextWait messages []
 
